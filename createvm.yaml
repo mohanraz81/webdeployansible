@@ -1,0 +1,68 @@
+---
+- hosts: localhost
+  tasks:
+  - name: example using security group rule descriptions
+    ec2_group:
+      name: websgtest
+      description: sg with rule descriptions
+      vpc_id: vpc-01fc09b97c631b1fc
+      region: us-east-1
+      rules:
+        - proto: tcp
+          ports:
+          - 80
+          cidr_ip: 0.0.0.0/0
+          rule_desc: allow all on port 80
+        - proto: tcp
+          ports:
+          - 22
+          cidr_ip: 0.0.0.0/0
+          rule_desc: allow all on port 22
+    register: websg 
+  - debug:
+      var: websg
+  - ec2:
+      region: us-east-1
+      key_name: webkey
+      instance_type: t2.micro
+      image: ami-0922553b7b0369273
+      wait: yes
+      group_id: "{{ websg.group_id }}"
+      vpc_subnet_id: subnet-07e98575667fcf354
+      assign_public_ip: yes
+      instance_tags:
+        Name: webtestservers
+      count_tag: 
+        Name: webtestservers
+      exact_count: 1
+    register: webinstance
+  - debug:
+      var: webinstance
+  - add_host:
+      name: "{{ webinstance.tagged_instances[0].dns_name }}"
+      groups: webservers
+      ansible_user: ec2-user
+      instance_name: "{{ webinstance.tagged_instances[0].dns_name }}"
+      ansible_ssh_private_key_file: /home/ec2-user/environment/webtestkey.pem
+      ansible_become: yes
+  - name: "Wait for SSH banners"
+    local_action: wait_for port=22 host="{{ webinstance.tagged_instances[0].dns_name }}" search_regex=OpenSSH delay=5
+    become: False
+- hosts: webservers
+  tasks:
+  - name: install the latest version of Apache
+    yum:
+      name: httpd
+      state: latest
+    register: apache
+  - debug:
+      var: apache
+  - name: Copying Code
+    copy:
+      src: /home/ec2-user/environment/webcode/index.html
+      dest: /var/www/html/index.html
+  - name: Start service httpd, if not started
+    service:
+      name: httpd
+      state: started
+      enabled: yes
